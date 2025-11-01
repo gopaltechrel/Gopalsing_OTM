@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gopalsing Online Tests Monitor</title>
+
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --accent:#0d6efd;
+      --muted:#6c757d;
+      --bg:#f8f9fb;
+    }
+    body{
+      background: var(--bg);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+
+    /* Top bar similar to screenshot */
+    .topbar{
+      background: #fff;
+      box-shadow: 0 1px 0 rgba(0,0,0,.04);
+      padding: 12px 20px;
+      display:flex;
+      align-items:center;
+      gap:12px;
+      position:sticky;
+      top:0;
+      z-index:50;
+    }
+    .topbar .title{
+      font-size:24px;
+      font-weight:700;
+      margin-right:auto;
+    }
+    .search-input{ max-width:420px; width:100%; }
+
+    /* layout */
+    .main {
+      padding:20px;
+    }
+    .sidebar {
+      max-height:78vh;
+      overflow:auto;
+      padding-right:8px;
+    }
+    .card-anim{
+      border-radius:8px;
+      transition:transform .18s ease,box-shadow .18s ease;
+    }
+    .card-anim:hover{ transform:translateY(-6px); box-shadow:0 10px 30px rgba(13,110,253,.06); }
+
+    .thumb{
+      width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e9ecef;
+    }
+
+    .small-muted{ color:var(--muted); font-size:.9rem; }
+    .metric{ font-weight:700; font-size:1.25rem; color:#111; }
+
+    /* charts area spacing */
+    .chart-card{ min-height:200px; }
+
+    /* table style */
+    .table thead th { border-bottom-width:2px; }
+    .action-btn { min-width:66px; }
+
+    /* mobile adjustments */
+    @media (max-width:991px){
+      .sidebar { max-height:none; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="title">Gopalsing Online Tests Monitor</div>
+
+    <input id="globalSearch" class="form-control form-control-sm search-input" placeholder="Search student, test or id" />
+
+    <button id="exportBtn" class="btn btn-outline-secondary ms-2">Export</button>
+    <button id="importBtn" class="btn btn-outline-secondary ms-1">Import</button>
+    <input id="importFile" type="file" accept="application/json" style="display:none">
+
+    <button id="addRecordBtn" class="btn btn-primary ms-2">Add Record</button>
+  </header>
+
+  <main class="main container-fluid">
+    <div class="row g-3">
+      <!-- LEFT SIDEBAR -->
+      <aside class="col-lg-3">
+        <div class="card card-anim mb-3">
+          <div class="card-body sidebar">
+            <h6 class="mb-3">Filters</h6>
+
+            <div class="mb-3">
+              <select id="testFilter" class="form-select form-select-sm">
+                <option value="all">All Tests</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <select id="batchFilter" class="form-select form-select-sm">
+                <option value="all">All Batches</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <select id="statusFilter" class="form-select form-select-sm">
+                <option value="all">All Status</option>
+                <option value="pass">Pass</option>
+                <option value="fail">Fail</option>
+              </select>
+            </div>
+
+            <div class="d-grid gap-2 mb-3">
+              <button id="loadDemo" class="btn btn-outline-primary btn-sm">Load demo data</button>
+              <button id="clearAll" class="btn btn-outline-danger btn-sm">Clear</button>
+            </div>
+
+            <hr>
+            <p class="small-muted">Data stored locally. Export to back up. Import to restore.</p>
+            <hr>
+
+            <h6 class="mb-2">Summary Metrics</h6>
+            <div class="mb-2 small-muted">Total tests</div>
+            <div class="mb-3 metric" id="metricTests">0</div>
+
+            <div class="mb-2 small-muted">Total students</div>
+            <div class="mb-3 metric" id="metricStudents">0</div>
+
+            <div class="mb-2 small-muted">Avg score</div>
+            <div class="mb-3 metric" id="metricAvg">0</div>
+
+            <div class="mb-2 small-muted">Pass rate</div>
+            <div class="mb-3 metric" id="metricPass">0%</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- MIDDLE & RIGHT -->
+      <section class="col-lg-9">
+        <div class="row g-3 mb-2">
+          <div class="col-lg-6">
+            <div class="card card-anim chart-card p-3">
+              <h6>Score Distribution</h6>
+              <div style="min-height:220px">
+                <canvas id="scoreChart"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card card-anim chart-card p-3">
+              <h6>Time Spent (mins) — Avg</h6>
+              <div style="min-height:220px">
+                <canvas id="timeChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card card-anim p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">Recent Attempts</h6>
+            <div class="small-muted">Records: <span id="recordCount">0</span></div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr>
+                  <th style="width:4%">#</th>
+                  <th style="width:6%">Photo</th>
+                  <th style="width:22%">Student</th>
+                  <th style="width:20%">Test</th>
+                  <th style="width:8%">Score</th>
+                  <th style="width:8%">Time (m)</th>
+                  <th style="width:10%">Status</th>
+                  <th style="width:12%">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="recordsTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- RECORD MODAL -->
+  <div class="modal fade" id="recordModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <form id="recordForm">
+          <div class="modal-header bg-white">
+            <h5 class="modal-title">Add / Edit Attempt</h5>
+            <button class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="recId">
+            <div class="mb-2">
+              <label class="form-label small-muted">Student name</label>
+              <input id="studentName" class="form-control" required>
+            </div>
+            <div class="mb-2 row g-2">
+              <div class="col">
+                <label class="form-label small-muted">Batch</label>
+                <input id="studentBatch" class="form-control">
+              </div>
+              <div class="col">
+                <label class="form-label small-muted">Photo URL</label>
+                <input id="studentThumb" class="form-control" placeholder="https://...">
+              </div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small-muted">Test name</label>
+              <input id="testName" class="form-control" required>
+            </div>
+            <div class="row g-2">
+              <div class="col-6 mb-2">
+                <label class="form-label small-muted">Score (0-100)</label>
+                <input id="score" type="number" min="0" max="100" class="form-control" required>
+              </div>
+              <div class="col-6 mb-2">
+                <label class="form-label small-muted">Time (minutes)</label>
+                <input id="timeSpent" type="number" min="0" class="form-control">
+              </div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small-muted">Status</label>
+              <select id="attemptStatus" class="form-select">
+                <option value="pass">Pass</option>
+                <option value="fail">Fail</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Close</button>
+            <button class="btn btn-primary" id="saveRecord" type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+  // App logic
+  (function(){
+    const STORAGE_KEY = 'monitor_tests_v1';
+    let state = { records: [] };
+
+    // elements
+    const recordsTable = document.getElementById('recordsTable');
+    const recordCount = document.getElementById('recordCount');
+    const metricTests = document.getElementById('metricTests');
+    const metricStudents = document.getElementById('metricStudents');
+    const metricAvg = document.getElementById('metricAvg');
+    const metricPass = document.getElementById('metricPass');
+    const testFilter = document.getElementById('testFilter');
+    const batchFilter = document.getElementById('batchFilter');
+    const statusFilter = document.getElementById('statusFilter');
+    const globalSearch = document.getElementById('globalSearch');
+
+    const loadDemoBtn = document.getElementById('loadDemo');
+    const clearAllBtn = document.getElementById('clearAll');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const importFile = document.getElementById('importFile');
+    const addRecordBtn = document.getElementById('addRecordBtn');
+
+    const recordModalEl = document.getElementById('recordModal');
+    const recordForm = document.getElementById('recordForm');
+    const recId = document.getElementById('recId');
+    const studentName = document.getElementById('studentName');
+    const studentThumb = document.getElementById('studentThumb');
+    const studentBatch = document.getElementById('studentBatch');
+    const testName = document.getElementById('testName');
+    const scoreInput = document.getElementById('score');
+    const timeSpent = document.getElementById('timeSpent');
+    const attemptStatus = document.getElementById('attemptStatus');
+
+    const modal = new bootstrap.Modal(recordModalEl);
+
+    // charts
+    const scoreCtx = document.getElementById('scoreChart');
+    const timeCtx = document.getElementById('timeChart');
+    let scoreChart = null, timeChart = null;
+
+    // helpers
+    function uid(){ return Math.random().toString(36).slice(2,9); }
+    function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    function load(){ const raw = localStorage.getItem(STORAGE_KEY); state = raw ? JSON.parse(raw) : { records: []}; }
+
+    function escapeHtml(s){ return (s||'').toString().replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    // render functions
+    function buildFilters(){
+      // tests
+      const tests = [...new Set(state.records.map(r=>r.test))].sort();
+      testFilter.innerHTML = '<option value="all">All Tests</option>';
+      tests.forEach(t=>{ const o = document.createElement('option'); o.value = t; o.textContent = t; testFilter.appendChild(o); });
+      // batches
+      const batches = [...new Set(state.records.map(r=>r.batch).filter(Boolean))].sort((a,b)=>b-a);
+      batchFilter.innerHTML = '<option value="all">All Batches</option>';
+      batches.forEach(b=>{ const o = document.createElement('option'); o.value = b; o.textContent = b; batchFilter.appendChild(o); });
+    }
+
+    function updateMetrics(filtered){
+      const totalTests = new Set(state.records.map(r=>r.test)).size;
+      const totalStudents = new Set(state.records.map(r=>r.student)).size;
+      const avg = state.records.length ? Math.round(state.records.reduce((s,r)=>s + Number(r.score||0),0) / state.records.length) : 0;
+      const passRate = state.records.length ? Math.round((state.records.filter(r=>r.status==='pass').length / state.records.length)*100) : 0;
+      metricTests.textContent = totalTests;
+      metricStudents.textContent = totalStudents;
+      metricAvg.textContent = avg;
+      metricPass.textContent = passRate + '%';
+    }
+
+    function renderCharts(filtered){
+      // Score distribution (buckets 0-9,10-19,...90-99,100)
+      const buckets = Array.from({length:11}).map(()=>0);
+      filtered.forEach(r=>{
+        const s = Math.max(0, Math.min(100, Number(r.score||0)));
+        const idx = s===100 ? 10 : Math.floor(s/10);
+        buckets[idx]++;
+      });
+      const labels = ['0-9','10-19','20-29','30-39','40-49','50-59','60-69','70-79','80-89','90-99','100'];
+      if(scoreChart) scoreChart.destroy();
+      scoreChart = new Chart(scoreCtx, {
+        type:'bar',
+        data:{ labels, datasets: [{ label:'Students', data: buckets, backgroundColor:'#8dd3f7'}] },
+        options:{ plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+
+      // Avg time per test
+      const testGroups = {};
+      filtered.forEach(r=>{
+        if(!testGroups[r.test]) testGroups[r.test]=[];
+        testGroups[r.test].push(Number(r.time||0));
+      });
+      const tlabels = Object.keys(testGroups);
+      const avgTimes = tlabels.map(t=>{
+        const arr = testGroups[t];
+        return Math.round(arr.reduce((a,b)=>a+b,0)/arr.length || 0);
+      });
+      if(timeChart) timeChart.destroy();
+      timeChart = new Chart(timeCtx, {
+        type:'line',
+        data:{ labels: tlabels, datasets:[{ label:'Avg minutes', data: avgTimes, borderColor:'#66cc99', tension:0.3, fill:false }] },
+        options:{ plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }
+
+    function renderTable(){
+      const search = globalSearch.value.trim().toLowerCase();
+      const testF = testFilter.value;
+      const batchF = batchFilter.value;
+      const statusF = statusFilter.value;
+      const filtered = state.records.filter(r=>{
+        if(testF!=='all' && r.test !== testF) return false;
+        if(batchF!=='all' && (r.batch||'') !== batchF) return false;
+        if(statusF!=='all' && r.status !== statusF) return false;
+        if(search){
+          const hay = (r.student + ' ' + r.test + ' ' + (r.id||'')).toLowerCase();
+          if(!hay.includes(search)) return false;
+        }
+        return true;
+      });
+
+      recordsTable.innerHTML = '';
+      filtered.slice().reverse().forEach((r, idx)=>{
+        const row = document.createElement('tr');
+        const index = filtered.length - idx;
+        const thumb = r.thumb || 'https://via.placeholder.com/40?text=U';
+        row.innerHTML = `
+          <td>${index}</td>
+          <td><img src="${escapeHtml(thumb)}" class="thumb" alt=""></td>
+          <td><strong>${escapeHtml(r.student)}</strong><div class="small-muted">ID: ${escapeHtml(r.id||'')}</div></td>
+          <td>${escapeHtml(r.test)}<div class="small-muted">${escapeHtml(r.batch||'')}</div></td>
+          <td>${escapeHtml(String(r.score||'0'))}%</td>
+          <td>${escapeHtml(String(r.time||''))}</td>
+          <td>${r.status==='pass' ? '<span class="badge bg-success">Pass</span>' : '<span class="badge bg-danger">Fail</span>'}</td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary me-1 editBtn action-btn" data-id="${r.id}">Edit</button>
+            <button class="btn btn-sm btn-outline-danger deleteBtn action-btn" data-id="${r.id}">Delete</button>
+          </td>
+        `;
+        recordsTable.appendChild(row);
+      });
+
+      recordCount.textContent = filtered.length;
+      updateMetrics(filtered);
+      renderCharts(filtered);
+      buildFilters();
+    }
+
+    // actions
+    function openAddModal(){
+      recId.value = '';
+      studentName.value = '';
+      studentThumb.value = '';
+      studentBatch.value = '';
+      testName.value = '';
+      scoreInput.value = '';
+      timeSpent.value = '';
+      attemptStatus.value = 'pass';
+      modal.show();
+    }
+
+    function openEditModal(id){
+      const r = state.records.find(x=>x.id===id);
+      if(!r) return alert('Record not found');
+      recId.value = r.id;
+      studentName.value = r.student;
+      studentThumb.value = r.thumb || '';
+      studentBatch.value = r.batch || '';
+      testName.value = r.test;
+      scoreInput.value = r.score;
+      timeSpent.value = r.time;
+      attemptStatus.value = r.status;
+      modal.show();
+    }
+
+    // handle form submit
+    recordForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const idVal = recId.value || uid();
+      const model = {
+        id: idVal,
+        student: studentName.value.trim(),
+        thumb: studentThumb.value.trim(),
+        batch: studentBatch.value.trim(),
+        test: testName.value.trim(),
+        score: Number(scoreInput.value) || 0,
+        time: Number(timeSpent.value) || 0,
+        status: attemptStatus.value
+      };
+      if(!model.student || !model.test){
+        return alert('Student and Test required');
+      }
+      const idx = state.records.findIndex(x=>x.id===idVal);
+      if(idx >= 0) state.records[idx] = model;
+      else state.records.push(model);
+      save();
+      renderTable();
+      modal.hide();
+    });
+
+    document.addEventListener('click', function(e){
+      if(e.target.matches('.editBtn')){
+        openEditModal(e.target.dataset.id);
+      } else if(e.target.matches('.deleteBtn')){
+        if(!confirm('Delete this record?')) return;
+        state.records = state.records.filter(x=>x.id!==e.target.dataset.id);
+        save(); renderTable();
+      }
+    });
+
+    // export / import
+    exportBtn.addEventListener('click', function(){
+      const blob = new Blob([JSON.stringify(state.records,null,2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'test-records.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    importBtn.addEventListener('click', ()=> importFile.click());
+    importFile.addEventListener('change', async function(e){
+      const f = e.target.files[0];
+      if(!f) return;
+      try{
+        const txt = await f.text();
+        const data = JSON.parse(txt);
+        if(!Array.isArray(data)) throw new Error('Invalid format');
+        state.records = data.map(d=>({
+          id: d.id || uid(),
+          student: d.student || '',
+          thumb: d.thumb || '',
+          batch: d.batch || '',
+          test: d.test || '',
+          score: Number(d.score) || 0,
+          time: Number(d.time) || 0,
+          status: d.status || 'fail'
+        }));
+        save(); renderTable(); alert('Imported');
+      }catch(err){
+        alert('Import failed: Invalid file');
+      }
+      e.target.value = '';
+    });
+
+    // demo / clear
+    loadDemoBtn.addEventListener('click', function(){
+      state.records = [
+        { id: 'r1', student:'Meera Iyer', thumb:'https://i.pravatar.cc/40?img=5', batch:'2021', test:'English Proficiency', score:69, time:42, status:'pass' },
+        { id: 'r3', student:'Sana Patel', thumb:'https://i.pravatar.cc/40?img=15', batch:'2021', test:'English Proficiency', score:48, time:35, status:'fail' },
+        // add more if you like
+      ];
+      save(); renderTable();
+    });
+
+    clearAllBtn.addEventListener('click', function(){
+      if(!confirm('Clear all records?')) return;
+      state.records = []; save(); renderTable();
+    });
+
+    // filters + search
+    [testFilter, batchFilter, statusFilter].forEach(el => el.addEventListener('change', renderTable));
+    globalSearch.addEventListener('input', renderTable);
+
+    addRecordBtn.addEventListener('click', openAddModal);
+
+    // init
+    load();
+    renderTable();
+
+    // debug: Ctrl+D toggle state dump (similar to earlier)
+    window.addEventListener('keydown', function(e){
+      if(e.ctrlKey && e.key.toLowerCase()==='d'){
+        console.log('STATE:', state);
+        alert('State logged to console');
+      }
+    });
+
+  })();
+  </script>
+</body>
+</html>
